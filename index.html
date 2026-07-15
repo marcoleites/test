@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>After-Hours Ticker Dashboard</title>
+<style>
+  :root { color-scheme: light; }
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-page:   #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --up:             #006300;
+    --down:           #d03b3b;
+    --series-1: #2a78d6; --series-2: #008300; --series-3: #e87ba4; --series-4: #eda100;
+    --series-5: #1baf7a; --series-6: #eb6834; --series-7: #4a3aa7; --series-8: #e34948;
+    --series-9: #2a78d6; --series-10: #008300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-page:   #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --up:             #0ca30c;
+      --down:           #e66767;
+      --series-1: #3987e5; --series-2: #008300; --series-3: #d55181; --series-4: #c98500;
+      --series-5: #199e70; --series-6: #d95926; --series-7: #9085e9; --series-8: #e66767;
+      --series-9: #3987e5; --series-10: #008300;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-page:   #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --up:             #0ca30c;
+    --down:           #e66767;
+    --series-1: #3987e5; --series-2: #008300; --series-3: #d55181; --series-4: #c98500;
+    --series-5: #199e70; --series-6: #d95926; --series-7: #9085e9; --series-8: #e66767;
+    --series-9: #3987e5; --series-10: #008300;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--surface-page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .viz-root { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  .page-title { font-size: 20px; font-weight: 600; margin: 0 0 2px; }
+  .page-sub { font-size: 13px; color: var(--text-secondary); margin: 0 0 20px; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .card-title { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .card-sub { font-size: 12px; color: var(--text-secondary); margin: 0 0 14px; }
+
+  .slots-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+  }
+  @media (max-width: 720px) { .slots-grid { grid-template-columns: repeat(2, 1fr); } }
+
+  .slot { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .slot input {
+    width: 100%;
+    min-width: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+  }
+  .slot input::placeholder { color: var(--text-muted); text-transform: none; }
+  .slot input:focus { outline: 2px solid var(--series-1); outline-offset: 1px; }
+
+  .controls-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  button.primary {
+    background: var(--series-1);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  .live-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+  .status-line { font-size: 12px; color: var(--text-muted); margin-left: auto; text-align: right; }
+  .status-line .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:5px; background: var(--text-muted); }
+  .status-line.live .dot { background: var(--up); }
+
+  .errors { margin-top: 10px; font-size: 12px; color: var(--down); }
+  .errors div { margin-top: 2px; }
+
+  .empty-state { font-size: 13px; color: var(--text-secondary); padding: 30px 0; text-align: center; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  thead th {
+    text-align: right;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--gridline);
+    white-space: nowrap;
+  }
+  thead th:first-child, tbody td:first-child { text-align: left; }
+  tbody td {
+    text-align: right;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--gridline);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  .px { color: var(--text-primary); font-weight: 500; }
+  .pct { font-size: 11.5px; margin-left: 5px; }
+  .pct.up { color: var(--up); }
+  .pct.down { color: var(--down); }
+  .cell-empty { color: var(--text-muted); }
+  .table-scroll { overflow-x: auto; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px 20px; margin-top: 12px; }
+  .legend-item { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+  .legend-item .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .legend-item .name { color: var(--text-primary); font-weight: 600; }
+  .legend-item .company { color: var(--text-muted); font-size: 11px; }
+  .legend-item .val { font-variant-numeric: tabular-nums; }
+
+  .chart-wrap { position: relative; }
+  svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+  .gridline { stroke: var(--gridline); stroke-width: 1; }
+  .baseline { stroke: var(--baseline); stroke-width: 1; }
+  .axis-label { fill: var(--text-muted); font-size: 10.5px; }
+  .series-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .end-dot { stroke-width: 2; }
+  .end-label { font-size: 11px; font-weight: 600; fill: var(--text-primary); }
+  .entry-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+
+  .crosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; pointer-events: none; }
+  .hover-dot { stroke-width: 2; pointer-events: none; }
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 11.5px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    min-width: 120px;
+    display: none;
+    z-index: 5;
+  }
+  .tooltip .t-time { font-weight: 600; margin-bottom: 4px; color: var(--text-primary); }
+  .tooltip .t-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+  .tooltip .t-row .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .tooltip .t-row .sym { color: var(--text-primary); font-weight: 600; min-width: 34px; }
+  .tooltip .t-row .px { color: var(--text-secondary); }
+
+  .footnote { font-size: 11px; color: var(--text-muted); margin-top: 14px; line-height: 1.5; }
+  .footnote code { background: var(--gridline); border-radius: 3px; padding: 1px 4px; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <p class="page-title">After-Hours Ticker Dashboard</p>
+  <p class="page-sub">4:00 PM – 6:00 PM ET · 5-minute bars · % change from the 4:00 PM close · source: Yahoo Finance</p>
+
+  <div class="card">
+    <p class="card-title">Tickers</p>
+    <p class="card-sub">Enter up to 10 symbols. Each slot keeps a fixed color regardless of what you type into it.</p>
+    <div class="slots-grid" id="slotsGrid"></div>
+    <div class="controls-row">
+      <button class="primary" id="loadBtn">Load data</button>
+      <label class="live-toggle"><input type="checkbox" id="liveToggle"> Auto-refresh every 60s</label>
+      <span class="status-line" id="statusLine"><span class="dot"></span>Idle</span>
+    </div>
+    <div class="errors" id="errorsBox"></div>
+  </div>
+
+  <div class="card" id="tableCard">
+    <p class="card-title">Bar-by-bar closes, 5-minute intervals (price and % from 4 pm close)</p>
+    <div class="empty-state" id="tableEmpty">Enter ticker symbols above and click "Load data" to see after-hours prints.</div>
+    <div class="table-scroll"><table id="dataTable" style="display:none"></table></div>
+  </div>
+
+  <div class="card" id="chartCard">
+    <p class="card-title">After-hours move — percent change from the 4:00 pm close</p>
+    <p class="card-sub">5-minute bar closes, indexed per ticker. Hover for exact prints.</p>
+    <div class="empty-state" id="chartEmpty">Chart will appear once at least one ticker loads.</div>
+    <div class="chart-wrap" id="chartWrap" style="display:none">
+      <svg class="chart" id="chartSvg" viewBox="0 0 960 460" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <p class="footnote">
+    Data is pulled client-side from Yahoo Finance's public chart endpoint (5-minute bars, pre/post market included) and
+    filtered to 4:00–6:00 PM ET. Yahoo does not officially support direct browser calls, so if a ticker fails to load
+    with a network/CORS error, try serving this file from a local server instead of opening it directly
+    (e.g. <code>python3 -m http.server</code> in this folder, then open <code>http://localhost:8000</code>), or reload —
+    a couple of fallback routes are attempted automatically. Prices reflect the last available print in each 5-minute
+    bucket and are not investment advice.
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var SLOT_COUNT = 10;
+  var WINDOW_START = 16 * 60;
+  var WINDOW_END = 18 * 60;
+  var STEP = 5;
+
+  var slots = [];
+  for (var m = WINDOW_START; m <= WINDOW_END; m += STEP) slots.push(m);
+
+  function minutesToLabel(m) {
+    var hh = Math.floor(m / 60), mm = m % 60;
+    return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+  }
+
+  function seriesVar(i) { return "var(--series-" + (i + 1) + ")"; }
+  function isDashed(i) { return i >= 8; }
+
+  var slotsGrid = document.getElementById("slotsGrid");
+  var inputs = [];
+  for (var i = 0; i < SLOT_COUNT; i++) {
+    var wrap = document.createElement("div");
+    wrap.className = "slot";
+    var sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = seriesVar(i);
+    if (isDashed(i)) { sw.style.border = "1px dashed " + "rgba(0,0,0,0.35)"; }
+    var inp = document.createElement("input");
+    inp.type = "text";
+    inp.placeholder = "Ticker " + (i + 1);
+    inp.autocomplete = "off";
+    inp.spellcheck = false;
+    wrap.appendChild(sw);
+    wrap.appendChild(inp);
+    slotsGrid.appendChild(wrap);
+    inputs.push(inp);
+  }
+
+  var loadBtn = document.getElementById("loadBtn");
+  var liveToggle = document.getElementById("liveToggle");
+  var statusLine = document.getElementById("statusLine");
+  var errorsBox = document.getElementById("errorsBox");
+  var tableEmpty = document.getElementById("tableEmpty");
+  var dataTable = document.getElementById("dataTable");
+  var chartEmpty = document.getElementById("chartEmpty");
+  var chartWrap = document.getElementById("chartWrap");
+  var chartSvg = document.getElementById("chartSvg");
+  var legendEl = document.getElementById("legend");
+  var tooltip = document.getElementById("tooltip");
+
+  var refreshTimer = null;
+  var lastResults = [];
+
+  function marketPhase() {
+    var now = new Date();
+    var fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York", hour: "2-digit", minute: "2-digit",
+      hour12: false, weekday: "short"
+    });
+    var parts = fmt.formatToParts(now);
+    var get = function (t) { return parts.find(function (p) { return p.type === t; }).value; };
+    var wd = get("weekday");
+    var hh = parseInt(get("hour"), 10), mmv = parseInt(get("minute"), 10);
+    var mins = hh * 60 + mmv;
+    if (wd === "Sat" || wd === "Sun") return "Weekend — markets closed";
+    if (mins < 4 * 60) return "Pre-market";
+    if (mins < 9 * 60 + 30) return "Pre-market";
+    if (mins < 16 * 60) return "Regular session";
+    if (mins < 20 * 60) return "After-hours";
+    return "Closed";
+  }
+
+  function setStatus(text, live) {
+    statusLine.classList.toggle("live", !!live);
+    statusLine.innerHTML = "<span class=\"dot\"></span>" + text;
+  }
+
+  async function fetchYahooChart(symbol) {
+    var enc = encodeURIComponent(symbol);
+    var base = "https://query1.finance.yahoo.com/v8/finance/chart/" + enc + "?interval=5m&range=1d&includePrePost=true";
+    var base2 = "https://query2.finance.yahoo.com/v8/finance/chart/" + enc + "?interval=5m&range=1d&includePrePost=true";
+    var attempts = [
+      base, base2,
+      "https://corsproxy.io/?url=" + encodeURIComponent(base),
+      "https://api.allorigins.win/raw?url=" + encodeURIComponent(base)
+    ];
+    var lastErr = null;
+    for (var i = 0; i < attempts.length; i++) {
+      try {
+        var res = await fetch(attempts[i], { cache: "no-store" });
+        if (!res.ok) { lastErr = new Error("HTTP " + res.status); continue; }
+        var json = await res.json();
+        if (json && json.chart && json.chart.result && json.chart.result[0]) return json;
+        if (json && json.chart && json.chart.error) { lastErr = new Error(json.chart.error.description || "Yahoo error"); continue; }
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr || new Error("Fetch failed");
+  }
+
+  async function loadTicker(symbol) {
+    var json = await fetchYahooChart(symbol);
+    var result = json.chart.result[0];
+    var meta = result.meta || {};
+    var timestamps = result.timestamp || [];
+    var quote = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {};
+    var closes = quote.close || [];
+    var etFmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false
+    });
+    var bars = {};
+    for (var i = 0; i < timestamps.length; i++) {
+      var price = closes[i];
+      if (price === null || price === undefined) continue;
+      var d = new Date(timestamps[i] * 1000);
+      var parts = etFmt.formatToParts(d);
+      var hh = parseInt(parts.find(function (p) { return p.type === "hour"; }).value, 10);
+      var mm = parseInt(parts.find(function (p) { return p.type === "minute"; }).value, 10);
+      var minuteOfDay = hh * 60 + mm;
+      var bucket = Math.round(minuteOfDay / STEP) * STEP;
+      if (bucket < WINDOW_START || bucket > WINDOW_END) continue;
+      bars[bucket] = price;
+    }
+    var baseline = bars[WINDOW_START];
+    if (baseline === undefined) {
+      throw new Error("no 4:00 PM print in range yet");
+    }
+    return {
+      symbol: symbol,
+      name: meta.shortName || meta.longName || symbol,
+      bars: bars,
+      baseline: baseline
+    };
+  }
+
+  function fmtPrice(v) { return "$" + v.toFixed(2); }
+  function fmtPct(v) {
+    var s = v >= 0 ? "+" : "";
+    return s + v.toFixed(1) + "%";
+  }
+
+  function renderTable(results) {
+    if (!results.length) {
+      tableEmpty.style.display = "";
+      dataTable.style.display = "none";
+      dataTable.innerHTML = "";
+      return;
+    }
+    tableEmpty.style.display = "none";
+    dataTable.style.display = "";
+    var thead = "<thead><tr><th>Bar (ET)</th>" + results.map(function (r) {
+      return "<th>" + r.symbol + "</th>";
+    }).join("") + "</tr></thead>";
+    var rows = slots.map(function (m) {
+      var cells = results.map(function (r) {
+        var px = r.bars[m];
+        if (px === undefined) return "<td class=\"cell-empty\">—</td>";
+        var pct = (px / r.baseline - 1) * 100;
+        var cls = pct >= 0 ? "up" : "down";
+        return "<td><span class=\"px\">" + fmtPrice(px) + "</span><span class=\"pct " + cls + "\">" + fmtPct(pct) + "</span></td>";
+      }).join("");
+      return "<tr><td>" + minutesToLabel(m) + "</td>" + cells + "</tr>";
+    }).join("");
+    dataTable.innerHTML = thead + "<tbody>" + rows + "</tbody>";
+  }
+
+  function niceStep(range) {
+    if (range <= 0) return 5;
+    var rough = range / 5;
+    var mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    var norm = rough / mag;
+    var step;
+    if (norm < 1.5) step = 1; else if (norm < 3) step = 2; else if (norm < 7) step = 5; else step = 10;
+    return step * mag;
+  }
+
+  var svgNS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs) {
+    var e = document.createElementNS(svgNS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function renderChart(results, colorIdx) {
+    chartSvg.innerHTML = "";
+    legendEl.innerHTML = "";
+    if (!results.length) {
+      chartEmpty.style.display = "";
+      chartWrap.style.display = "none";
+      return;
+    }
+    chartEmpty.style.display = "none";
+    chartWrap.style.display = "";
+
+    var W = 960, H = 460;
+    var showEndLabels = results.length <= 4;
+    var marginLeft = 50, marginRight = showEndLabels ? 92 : 20, marginTop = 16, marginBottom = 40;
+    var plotW = W - marginLeft - marginRight;
+    var plotH = H - marginTop - marginBottom;
+
+    var series = results.map(function (r, idx) {
+      var pts = [];
+      slots.forEach(function (m, i) {
+        var px = r.bars[m];
+        if (px === undefined) return;
+        pts.push({ i: i, m: m, pct: (px / r.baseline - 1) * 100, price: px });
+      });
+      return { r: r, pts: pts, color: seriesVar(colorIdx[idx]), dashed: isDashed(colorIdx[idx]) };
+    });
+
+    var allPct = [];
+    series.forEach(function (s) { s.pts.forEach(function (p) { allPct.push(p.pct); }); });
+    allPct.push(0);
+    var rawMin = Math.min.apply(null, allPct), rawMax = Math.max.apply(null, allPct);
+    var pad = Math.max((rawMax - rawMin) * 0.12, 1);
+    var yMin = rawMin - pad, yMax = rawMax + pad;
+    var step = niceStep(yMax - yMin);
+    yMin = Math.floor(yMin / step) * step;
+    yMax = Math.ceil(yMax / step) * step;
+    if (yMin > 0) yMin = 0;
+    if (yMax < 0) yMax = 0;
+
+    function xAt(i) { return marginLeft + (i / (slots.length - 1)) * plotW; }
+    function yAt(v) { return marginTop + (yMax - v) / (yMax - yMin) * plotH; }
+
+    var gridGroup = el("g", {});
+    for (var gv = yMin; gv <= yMax + 1e-9; gv += step) {
+      var y = yAt(gv);
+      var isZero = Math.abs(gv) < 1e-9;
+      gridGroup.appendChild(el("line", {
+        x1: marginLeft, x2: marginLeft + plotW, y1: y, y2: y,
+        class: isZero ? "baseline" : "gridline"
+      }));
+      var lbl = el("text", { x: marginLeft - 8, y: y + 3, class: "axis-label", "text-anchor": "end" });
+      lbl.textContent = (gv > 0 ? "+" : "") + gv.toFixed(gv % 1 === 0 ? 0 : 1) + "%";
+      gridGroup.appendChild(lbl);
+    }
+    chartSvg.appendChild(gridGroup);
+
+    var xLabelGroup = el("g", {});
+    slots.forEach(function (m, i) {
+      if (i % 2 !== 0) return;
+      var t = el("text", { x: xAt(i), y: H - marginBottom + 18, class: "axis-label", "text-anchor": "middle" });
+      t.textContent = minutesToLabel(m);
+      xLabelGroup.appendChild(t);
+    });
+    chartSvg.appendChild(xLabelGroup);
+
+    var endLabelPositions = [];
+    series.forEach(function (s) {
+      if (!s.pts.length) return;
+      var segs = [];
+      var cur = [];
+      var lastI = null;
+      s.pts.forEach(function (p) {
+        if (lastI !== null && p.i !== lastI + 1) { segs.push(cur); cur = []; }
+        cur.push(p);
+        lastI = p.i;
+      });
+      if (cur.length) segs.push(cur);
+      segs.forEach(function (seg) {
+        var d = seg.map(function (p, idx2) {
+          return (idx2 === 0 ? "M" : "L") + xAt(p.i).toFixed(2) + "," + yAt(p.pct).toFixed(2);
+        }).join(" ");
+        var path = el("path", { d: d, class: "series-line", stroke: s.color });
+        if (s.dashed) path.setAttribute("stroke-dasharray", "6 4");
+        chartSvg.appendChild(path);
+      });
+      var last = s.pts[s.pts.length - 1];
+      var ex = xAt(last.i), ey = yAt(last.pct);
+      var dot = el("circle", { cx: ex, cy: ey, r: 4, fill: s.color, class: "end-dot", stroke: "var(--surface-1)" });
+      chartSvg.appendChild(dot);
+      if (showEndLabels) endLabelPositions.push({ x: ex, y: ey, text: fmtPct(last.pct), color: s.color, symbol: s.r.symbol });
+    });
+
+    if (showEndLabels && endLabelPositions.length) {
+      endLabelPositions.sort(function (a, b) { return a.y - b.y; });
+      var minGap = 16;
+      for (var p = 1; p < endLabelPositions.length; p++) {
+        if (endLabelPositions[p].y - endLabelPositions[p - 1].y < minGap) {
+          endLabelPositions[p].y = endLabelPositions[p - 1].y + minGap;
+        }
+      }
+      endLabelPositions.forEach(function (lp) {
+        var labelY = lp.y;
+        var t = el("text", { x: lp.x + 10, y: labelY + 4, class: "end-label", fill: lp.color });
+        t.textContent = lp.symbol + " " + lp.text;
+        chartSvg.appendChild(t);
+      });
+    }
+
+    var overlay = el("rect", {
+      x: marginLeft, y: marginTop, width: plotW, height: plotH,
+      fill: "transparent", style: "cursor:crosshair"
+    });
+    var crosshair = el("line", { class: "crosshair", y1: marginTop, y2: marginTop + plotH, x1: -100, x2: -100 });
+    chartSvg.appendChild(crosshair);
+    var hoverDots = series.map(function (s) {
+      var c = el("circle", { r: 4, class: "hover-dot", fill: s.color, stroke: "var(--surface-1)", opacity: 0 });
+      chartSvg.appendChild(c);
+      return c;
+    });
+    chartSvg.appendChild(overlay);
+
+    function onMove(evt) {
+      var rect = chartSvg.getBoundingClientRect();
+      var scaleX = W / rect.width;
+      var mx = (evt.clientX - rect.left) * scaleX;
+      var idx = Math.round((mx - marginLeft) / plotW * (slots.length - 1));
+      idx = Math.max(0, Math.min(slots.length - 1, idx));
+      var cx = xAt(idx);
+      crosshair.setAttribute("x1", cx);
+      crosshair.setAttribute("x2", cx);
+      var rows = [];
+      series.forEach(function (s, si) {
+        var p = s.pts.filter(function (pt) { return pt.i === idx; })[0];
+        if (!p) { hoverDots[si].setAttribute("opacity", 0); return; }
+        hoverDots[si].setAttribute("opacity", 1);
+        hoverDots[si].setAttribute("cx", cx);
+        hoverDots[si].setAttribute("cy", yAt(p.pct));
+        rows.push(
+          "<div class=\"t-row\"><span class=\"dot\" style=\"background:" + s.color + "\"></span>" +
+          "<span class=\"sym\">" + s.r.symbol + "</span>" +
+          "<span class=\"px\">" + fmtPrice(p.price) + " (" + fmtPct(p.pct) + ")</span></div>"
+        );
+      });
+      tooltip.innerHTML = "<div class=\"t-time\">" + minutesToLabel(slots[idx]) + " ET</div>" + rows.join("");
+      tooltip.style.display = rows.length ? "block" : "none";
+      var wrapRect = chartWrap.getBoundingClientRect();
+      var px = (evt.clientX - wrapRect.left) + 14;
+      var py = (evt.clientY - wrapRect.top) - 10;
+      if (px + 150 > wrapRect.width) px = (evt.clientX - wrapRect.left) - 160;
+      tooltip.style.left = px + "px";
+      tooltip.style.top = Math.max(0, py) + "px";
+    }
+    overlay.addEventListener("mousemove", onMove);
+    overlay.addEventListener("mouseleave", function () {
+      crosshair.setAttribute("x1", -100);
+      crosshair.setAttribute("x2", -100);
+      hoverDots.forEach(function (d) { d.setAttribute("opacity", 0); });
+      tooltip.style.display = "none";
+    });
+
+    series.forEach(function (s) {
+      var last = s.pts.length ? s.pts[s.pts.length - 1] : null;
+      var item = document.createElement("div");
+      item.className = "legend-item";
+      var dotHtml = "<span class=\"dot\" style=\"background:" + s.color + (s.dashed ? ";outline:1px dashed rgba(128,128,128,.6);outline-offset:2px" : "") + "\"></span>";
+      var valHtml = last ? "<span class=\"val " + (last.pct >= 0 ? "" : "") + "\" style=\"color:" + (last.pct >= 0 ? "var(--up)" : "var(--down)") + "\">" + fmtPct(last.pct) + "</span>" : "<span class=\"val cell-empty\">—</span>";
+      item.innerHTML = dotHtml + "<span class=\"name\">" + s.r.symbol + "</span>" +
+        "<span class=\"company\">" + (s.r.name && s.r.name !== s.r.symbol ? s.r.name : "") + "</span>" + valHtml;
+      legendEl.appendChild(item);
+    });
+  }
+
+  async function loadAll() {
+    var entries = inputs.map(function (inp, idx) { return { idx: idx, symbol: inp.value.trim().toUpperCase() }; })
+      .filter(function (e) { return e.symbol.length > 0; });
+
+    errorsBox.innerHTML = "";
+    if (!entries.length) {
+      renderTable([]);
+      renderChart([], []);
+      setStatus("Enter at least one ticker", false);
+      return;
+    }
+
+    loadBtn.disabled = true;
+    setStatus("Loading " + entries.length + " ticker" + (entries.length > 1 ? "s" : "") + "…", false);
+
+    var results = [];
+    var colorIdx = [];
+    var errors = [];
+
+    await Promise.all(entries.map(async function (e) {
+      try {
+        var r = await loadTicker(e.symbol);
+        results.push(r);
+        colorIdx.push(e.idx);
+      } catch (err) {
+        errors.push(e.symbol + ": " + (err && err.message ? err.message : "failed to load"));
+      }
+    }));
+
+    var order = entries.map(function (e) { return e.idx; });
+    var pairs = results.map(function (r, i) { return { r: r, c: colorIdx[i] }; });
+    pairs.sort(function (a, b) { return order.indexOf(a.c) - order.indexOf(b.c); });
+    results = pairs.map(function (p) { return p.r; });
+    colorIdx = pairs.map(function (p) { return p.c; });
+
+    lastResults = results;
+    renderTable(results);
+    renderChart(results, colorIdx);
+
+    if (errors.length) {
+      errorsBox.innerHTML = errors.map(function (msg) { return "<div>" + msg + "</div>"; }).join("");
+    }
+
+    var now = new Date();
+    var timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    setStatus(marketPhase() + " · last updated " + timeStr, liveToggle.checked);
+    loadBtn.disabled = false;
+  }
+
+  loadBtn.addEventListener("click", loadAll);
+  liveToggle.addEventListener("change", function () {
+    if (liveToggle.checked) {
+      refreshTimer = setInterval(loadAll, 60000);
+      loadAll();
+    } else {
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+  });
+  inputs.forEach(function (inp) {
+    inp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") loadAll();
+    });
+  });
+
+  setStatus("Idle", false);
+})();
+</script>
+</body>
+</html>
