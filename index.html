@@ -440,49 +440,38 @@
     var q = "interval=5m&includePrePost=true&period1=" + period1 + "&period2=" + period2;
     var base = "https://query1.finance.yahoo.com/v8/finance/chart/" + enc + "?" + q;
     var base2 = "https://query2.finance.yahoo.com/v8/finance/chart/" + enc + "?" + q;
-    return {
-      direct: [
-        { url: base, wrapped: false, label: "direct (query1)" },
-        { url: base2, wrapped: false, label: "direct (query2)" }
-      ],
-      proxy: [
-        { url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (allorigins/raw)" },
-        { url: "https://corsproxy.io/?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (corsproxy.io)" },
-        { url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(base), wrapped: false, label: "proxy (codetabs)" },
-        { url: "https://api.allorigins.win/get?url=" + encodeURIComponent(base), wrapped: true, label: "proxy (allorigins/get)" }
-      ]
-    };
+    return [
+      { url: base, wrapped: false, label: "direct (query1)", timeout: 6000 },
+      { url: base2, wrapped: false, label: "direct (query2)", timeout: 6000 },
+      { url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (allorigins/raw)", timeout: 12000 },
+      { url: "https://corsproxy.io/?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (corsproxy.io)", timeout: 12000 },
+      { url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(base), wrapped: false, label: "proxy (codetabs)", timeout: 12000 },
+      { url: "https://api.allorigins.win/get?url=" + encodeURIComponent(base), wrapped: true, label: "proxy (allorigins/get)", timeout: 12000 },
+      { url: "https://thingproxy.freeboard.io/fetch/" + base, wrapped: false, label: "proxy (thingproxy)", timeout: 12000 },
+      { url: "https://proxy.corsfix.com/?" + base, wrapped: false, label: "proxy (corsfix)", timeout: 12000 }
+    ];
   }
 
-  async function runWave(attempts, timeoutMs) {
-    var settled = await Promise.allSettled(attempts.map(function (a) {
-      return fetchWithTimeout(a.url, timeoutMs, a.wrapped).then(function (json) {
-        return { attempt: a, json: json };
-      });
-    }));
-    var errors = [];
-    for (var i = 0; i < settled.length; i++) {
-      var s = settled[i];
-      if (s.status === "fulfilled") {
-        var json = s.value.json;
-        if (json && json.chart && json.chart.result && json.chart.result[0]) return { ok: true, json: json };
-        var reason = (json && json.chart && json.chart.error && json.chart.error.description) || "unexpected response shape";
-        errors.push(attempts[i].label + ": " + reason);
-      } else {
-        errors.push(attempts[i].label + ": " + (s.reason && s.reason.message ? s.reason.message : "failed"));
-      }
-    }
-    return { ok: false, errors: errors };
-  }
-
+  // Fires every direct + proxy route at once and takes whichever succeeds first,
+  // instead of waiting for slow/dead routes to exhaust their timeout in sequence.
   async function fetchYahooChart(symbol, period1, period2) {
     var attempts = buildAttempts(symbol, period1, period2);
-    var wave1 = await runWave(attempts.direct, 6000);
-    if (wave1.ok) return wave1.json;
-    var wave2 = await runWave(attempts.proxy, 12000);
-    if (wave2.ok) return wave2.json;
-    var allErrors = wave1.errors.concat(wave2.errors);
-    throw new Error("all " + allErrors.length + " routes failed — " + allErrors.join("; "));
+    var errors = new Array(attempts.length);
+    var promises = attempts.map(function (a, i) {
+      return fetchWithTimeout(a.url, a.timeout, a.wrapped).then(function (json) {
+        if (json && json.chart && json.chart.result && json.chart.result[0]) return json;
+        throw new Error((json && json.chart && json.chart.error && json.chart.error.description) || "unexpected response shape");
+      }).catch(function (e) {
+        errors[i] = a.label + ": " + (e && e.message ? e.message : "failed");
+        throw e;
+      });
+    });
+    try {
+      return await Promise.any(promises);
+    } catch (aggErr) {
+      var list = errors.filter(Boolean);
+      throw new Error("all " + attempts.length + " routes failed — " + list.join("; "));
+    }
   }
 
   async function loadTicker(symbol, dateStr) {
