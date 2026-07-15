@@ -321,26 +321,52 @@
     statusLine.innerHTML = "<span class=\"dot\"></span>" + text;
   }
 
+  async function fetchWithTimeout(url, ms, parseWrapped) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, ms);
+    try {
+      var res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      var text = await res.text();
+      var payload = text;
+      if (parseWrapped) {
+        var wrapper = JSON.parse(text);
+        payload = wrapper.contents;
+      }
+      return JSON.parse(payload);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function fetchYahooChart(symbol) {
     var enc = encodeURIComponent(symbol);
     var base = "https://query1.finance.yahoo.com/v8/finance/chart/" + enc + "?interval=5m&range=1d&includePrePost=true";
     var base2 = "https://query2.finance.yahoo.com/v8/finance/chart/" + enc + "?interval=5m&range=1d&includePrePost=true";
     var attempts = [
-      base, base2,
-      "https://corsproxy.io/?url=" + encodeURIComponent(base),
-      "https://api.allorigins.win/raw?url=" + encodeURIComponent(base)
+      { url: base, wrapped: false, label: "direct (query1)" },
+      { url: base2, wrapped: false, label: "direct (query2)" },
+      { url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (allorigins/raw)" },
+      { url: "https://corsproxy.io/?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (corsproxy.io)" },
+      { url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(base), wrapped: false, label: "proxy (codetabs)" },
+      { url: "https://api.allorigins.win/get?url=" + encodeURIComponent(base), wrapped: true, label: "proxy (allorigins/get)" }
     ];
     var lastErr = null;
+    var lastLabel = "";
     for (var i = 0; i < attempts.length; i++) {
       try {
-        var res = await fetch(attempts[i], { cache: "no-store" });
-        if (!res.ok) { lastErr = new Error("HTTP " + res.status); continue; }
-        var json = await res.json();
+        var json = await fetchWithTimeout(attempts[i].url, 9000, attempts[i].wrapped);
         if (json && json.chart && json.chart.result && json.chart.result[0]) return json;
-        if (json && json.chart && json.chart.error) { lastErr = new Error(json.chart.error.description || "Yahoo error"); continue; }
-      } catch (e) { lastErr = e; }
+        if (json && json.chart && json.chart.error) { lastErr = new Error(json.chart.error.description || "symbol not found"); lastLabel = attempts[i].label; continue; }
+        lastErr = new Error("unexpected response shape");
+        lastLabel = attempts[i].label;
+      } catch (e) {
+        lastErr = e;
+        lastLabel = attempts[i].label;
+      }
     }
-    throw lastErr || new Error("Fetch failed");
+    var msg = (lastErr && lastErr.message) || "unknown error";
+    throw new Error("all " + attempts.length + " routes failed, last (" + lastLabel + "): " + msg);
   }
 
   async function loadTicker(symbol) {
