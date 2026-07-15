@@ -1,0 +1,13 @@
+{
+  "name": "after-hours-ticker-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local backend for the after-hours ticker dashboard (Firecrawl -> Yahoo Finance proxy).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

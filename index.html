@@ -265,14 +265,16 @@
   </div>
 
   <p class="footnote">
-    Data is pulled client-side from Yahoo Finance's public chart endpoint (5-minute bars, pre/post market included) for
-    the session date selected above, filtered to 4:00–6:00 PM ET. Yahoo typically retains 5-minute intraday bars for
-    roughly the last 60 calendar days — older dates or delisted/illiquid symbols may return no data. Yahoo does not
-    officially support direct browser calls, so if a ticker fails to load with a network/timeout error, try serving
-    this file from a local server instead of opening it directly (e.g. <code>python3 -m http.server</code> in this
-    folder, then open <code>http://localhost:8000</code>) — several fallback routes are attempted automatically, and
-    the error message names the last one that failed. Prices reflect the last available print in each 5-minute bucket
-    and are not investment advice.
+    Data is 5-minute bars (pre/post market included) from Yahoo Finance's public chart endpoint for the session date
+    selected above, filtered to 4:00–6:00 PM ET. Yahoo typically retains 5-minute intraday history for roughly the
+    last 60 calendar days — older dates or delisted/illiquid symbols may return no data. For the most reliable
+    loading, run the included local backend, which scrapes Yahoo through
+    <a href="https://www.firecrawl.dev/" target="_blank" rel="noopener">Firecrawl</a> instead of relying on public
+    CORS proxies: <code>FIRECRAWL_API_KEY=fc-... node server.js</code> in this folder, then open
+    <code>http://localhost:8000</code>. The Firecrawl key stays server-side — never put it in this HTML file. Without
+    the backend running, the page still works by racing Yahoo's endpoint directly against several public CORS
+    proxies; the error message names every route that failed. Prices reflect the last available print in each
+    5-minute bucket and are not investment advice.
   </p>
 </div>
 
@@ -441,6 +443,10 @@
     var base = "https://query1.finance.yahoo.com/v8/finance/chart/" + enc + "?" + q;
     var base2 = "https://query2.finance.yahoo.com/v8/finance/chart/" + enc + "?" + q;
     return [
+      // Local Node backend (server.js), if running — holds the Firecrawl key server-side
+      // and scrapes Yahoo for us, sidestepping CORS entirely. Silently loses the race
+      // (fails fast, same-origin 404) when the page is opened without the backend running.
+      { url: "/api/quote?symbol=" + enc + "&period1=" + period1 + "&period2=" + period2, wrapped: false, label: "local backend (Firecrawl)", timeout: 20000 },
       { url: base, wrapped: false, label: "direct (query1)", timeout: 6000 },
       { url: base2, wrapped: false, label: "direct (query2)", timeout: 6000 },
       { url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (allorigins/raw)", timeout: 12000 },
