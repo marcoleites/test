@@ -121,6 +121,27 @@
     cursor: pointer;
   }
   button.primary:disabled { opacity: 0.5; cursor: default; }
+  button.ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.ghost:hover { color: var(--text-primary); }
+  input[type="date"] {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    color-scheme: inherit;
+  }
+  #tableDateTag, #chartDateTag { color: var(--text-secondary); font-weight: 400; }
   .live-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
   .status-line { font-size: 12px; color: var(--text-muted); margin-left: auto; text-align: right; }
   .status-line .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:5px; background: var(--text-muted); }
@@ -204,6 +225,17 @@
   <p class="page-sub">4:00 PM – 6:00 PM ET · 5-minute bars · % change from the 4:00 PM close · source: Yahoo Finance</p>
 
   <div class="card">
+    <p class="card-title">Session date</p>
+    <p class="card-sub">Which trading day's 4:00–6:00 PM ET window to pull. Yahoo typically keeps 5-minute bars for roughly the last 60 calendar days.</p>
+    <div class="controls-row" style="margin-top:0">
+      <input type="date" id="sessionDate">
+      <button class="ghost" id="todayBtn" type="button">Today</button>
+      <button class="ghost" id="yesterdayBtn" type="button">Yesterday</button>
+      <span class="status-line" id="dateStatus"></span>
+    </div>
+  </div>
+
+  <div class="card">
     <p class="card-title">Tickers</p>
     <p class="card-sub">Enter up to 10 symbols. Each slot keeps a fixed color regardless of what you type into it.</p>
     <div class="slots-grid" id="slotsGrid"></div>
@@ -216,13 +248,13 @@
   </div>
 
   <div class="card" id="tableCard">
-    <p class="card-title">Bar-by-bar closes, 5-minute intervals (price and % from 4 pm close)</p>
+    <p class="card-title">Bar-by-bar closes, 5-minute intervals (price and % from 4 pm close)<span id="tableDateTag"></span></p>
     <div class="empty-state" id="tableEmpty">Enter ticker symbols above and click "Load data" to see after-hours prints.</div>
     <div class="table-scroll"><table id="dataTable" style="display:none"></table></div>
   </div>
 
   <div class="card" id="chartCard">
-    <p class="card-title">After-hours move — percent change from the 4:00 pm close</p>
+    <p class="card-title">After-hours move — percent change from the 4:00 pm close<span id="chartDateTag"></span></p>
     <p class="card-sub">5-minute bar closes, indexed per ticker. Hover for exact prints.</p>
     <div class="empty-state" id="chartEmpty">Chart will appear once at least one ticker loads.</div>
     <div class="chart-wrap" id="chartWrap" style="display:none">
@@ -233,12 +265,14 @@
   </div>
 
   <p class="footnote">
-    Data is pulled client-side from Yahoo Finance's public chart endpoint (5-minute bars, pre/post market included) and
-    filtered to 4:00–6:00 PM ET. Yahoo does not officially support direct browser calls, so if a ticker fails to load
-    with a network/CORS error, try serving this file from a local server instead of opening it directly
-    (e.g. <code>python3 -m http.server</code> in this folder, then open <code>http://localhost:8000</code>), or reload —
-    a couple of fallback routes are attempted automatically. Prices reflect the last available print in each 5-minute
-    bucket and are not investment advice.
+    Data is pulled client-side from Yahoo Finance's public chart endpoint (5-minute bars, pre/post market included) for
+    the session date selected above, filtered to 4:00–6:00 PM ET. Yahoo typically retains 5-minute intraday bars for
+    roughly the last 60 calendar days — older dates or delisted/illiquid symbols may return no data. Yahoo does not
+    officially support direct browser calls, so if a ticker fails to load with a network/timeout error, try serving
+    this file from a local server instead of opening it directly (e.g. <code>python3 -m http.server</code> in this
+    folder, then open <code>http://localhost:8000</code>) — several fallback routes are attempted automatically, and
+    the error message names the last one that failed. Prices reflect the last available print in each 5-minute bucket
+    and are not investment advice.
   </p>
 </div>
 
@@ -257,6 +291,31 @@
   function minutesToLabel(m) {
     var hh = Math.floor(m / 60), mm = m % 60;
     return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+  }
+
+  function todayET() {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+  }
+
+  function addDaysToDateStr(dateStr, delta) {
+    var y = parseInt(dateStr.slice(0, 4), 10), mo = parseInt(dateStr.slice(5, 7), 10) - 1, d = parseInt(dateStr.slice(8, 10), 10);
+    var t = Date.UTC(y, mo, d) + delta * 86400000;
+    return new Date(t).toISOString().slice(0, 10);
+  }
+
+  // Unix seconds for a given ET calendar date + wall-clock hh:mm, DST-safe.
+  function etDateTimeToUnixSeconds(dateStr, hh, mm) {
+    var y = parseInt(dateStr.slice(0, 4), 10), mo = parseInt(dateStr.slice(5, 7), 10) - 1, d = parseInt(dateStr.slice(8, 10), 10);
+    var guessMs = Date.UTC(y, mo, d, hh, mm, 0);
+    var fmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" });
+    var tzPart = fmt.formatToParts(new Date(guessMs)).find(function (p) { return p.type === "timeZoneName"; }).value;
+    var m = tzPart.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/);
+    var offsetSeconds = 0;
+    if (m) {
+      var sign = m[1] === "-" ? -1 : 1;
+      offsetSeconds = sign * ((parseInt(m[2], 10) * 3600) + (m[3] ? parseInt(m[3], 10) * 60 : 0));
+    }
+    return Math.floor(guessMs / 1000) - offsetSeconds;
   }
 
   function seriesVar(i) { return "var(--series-" + (i + 1) + ")"; }
@@ -293,11 +352,41 @@
   var chartSvg = document.getElementById("chartSvg");
   var legendEl = document.getElementById("legend");
   var tooltip = document.getElementById("tooltip");
+  var sessionDateInput = document.getElementById("sessionDate");
+  var todayBtn = document.getElementById("todayBtn");
+  var yesterdayBtn = document.getElementById("yesterdayBtn");
+  var dateStatus = document.getElementById("dateStatus");
+  var tableDateTag = document.getElementById("tableDateTag");
+  var chartDateTag = document.getElementById("chartDateTag");
+
+  var TODAY_ET = todayET();
+  sessionDateInput.value = TODAY_ET;
+  sessionDateInput.max = TODAY_ET;
+
+  function describeSelectedDate() {
+    var val = sessionDateInput.value || TODAY_ET;
+    var d = new Date(val + "T12:00:00Z");
+    var label = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" }).format(d);
+    var isToday = val === TODAY_ET;
+    dateStatus.innerHTML = "<span class=\"dot\"></span>" + label + (isToday ? " (today)" : "");
+    var tag = " — " + label;
+    tableDateTag.textContent = tag;
+    chartDateTag.textContent = tag;
+    liveToggle.parentElement.style.opacity = isToday ? "1" : "0.5";
+    liveToggle.disabled = !isToday;
+    if (!isToday && liveToggle.checked) { liveToggle.checked = false; liveToggle.dispatchEvent(new Event("change")); }
+    return val;
+  }
+  describeSelectedDate();
+  sessionDateInput.addEventListener("change", describeSelectedDate);
+  todayBtn.addEventListener("click", function () { sessionDateInput.value = TODAY_ET; describeSelectedDate(); });
+  yesterdayBtn.addEventListener("click", function () { sessionDateInput.value = addDaysToDateStr(TODAY_ET, -1); describeSelectedDate(); });
 
   var refreshTimer = null;
   var lastResults = [];
 
-  function marketPhase() {
+  function marketPhase(dateStr) {
+    if (dateStr !== TODAY_ET) return "Historical view";
     var now = new Date();
     var fmt = new Intl.DateTimeFormat("en-US", {
       timeZone: "America/New_York", hour: "2-digit", minute: "2-digit",
@@ -323,9 +412,16 @@
 
   async function fetchWithTimeout(url, ms, parseWrapped) {
     var ctrl = new AbortController();
-    var timer = setTimeout(function () { ctrl.abort(); }, ms);
+    var timedOut = false;
+    var timer = setTimeout(function () { timedOut = true; ctrl.abort(); }, ms);
     try {
-      var res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+      var res;
+      try {
+        res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+      } catch (e) {
+        if (timedOut) throw new Error("timed out after " + ms + "ms");
+        throw new Error("network error (" + (e && e.message ? e.message : "blocked") + ")");
+      }
       if (!res.ok) throw new Error("HTTP " + res.status);
       var text = await res.text();
       var payload = text;
@@ -339,38 +435,60 @@
     }
   }
 
-  async function fetchYahooChart(symbol) {
+  function buildAttempts(symbol, period1, period2) {
     var enc = encodeURIComponent(symbol);
-    var base = "https://query1.finance.yahoo.com/v8/finance/chart/" + enc + "?interval=5m&range=1d&includePrePost=true";
-    var base2 = "https://query2.finance.yahoo.com/v8/finance/chart/" + enc + "?interval=5m&range=1d&includePrePost=true";
-    var attempts = [
-      { url: base, wrapped: false, label: "direct (query1)" },
-      { url: base2, wrapped: false, label: "direct (query2)" },
-      { url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (allorigins/raw)" },
-      { url: "https://corsproxy.io/?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (corsproxy.io)" },
-      { url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(base), wrapped: false, label: "proxy (codetabs)" },
-      { url: "https://api.allorigins.win/get?url=" + encodeURIComponent(base), wrapped: true, label: "proxy (allorigins/get)" }
-    ];
-    var lastErr = null;
-    var lastLabel = "";
-    for (var i = 0; i < attempts.length; i++) {
-      try {
-        var json = await fetchWithTimeout(attempts[i].url, 9000, attempts[i].wrapped);
-        if (json && json.chart && json.chart.result && json.chart.result[0]) return json;
-        if (json && json.chart && json.chart.error) { lastErr = new Error(json.chart.error.description || "symbol not found"); lastLabel = attempts[i].label; continue; }
-        lastErr = new Error("unexpected response shape");
-        lastLabel = attempts[i].label;
-      } catch (e) {
-        lastErr = e;
-        lastLabel = attempts[i].label;
-      }
-    }
-    var msg = (lastErr && lastErr.message) || "unknown error";
-    throw new Error("all " + attempts.length + " routes failed, last (" + lastLabel + "): " + msg);
+    var q = "interval=5m&includePrePost=true&period1=" + period1 + "&period2=" + period2;
+    var base = "https://query1.finance.yahoo.com/v8/finance/chart/" + enc + "?" + q;
+    var base2 = "https://query2.finance.yahoo.com/v8/finance/chart/" + enc + "?" + q;
+    return {
+      direct: [
+        { url: base, wrapped: false, label: "direct (query1)" },
+        { url: base2, wrapped: false, label: "direct (query2)" }
+      ],
+      proxy: [
+        { url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (allorigins/raw)" },
+        { url: "https://corsproxy.io/?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (corsproxy.io)" },
+        { url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(base), wrapped: false, label: "proxy (codetabs)" },
+        { url: "https://api.allorigins.win/get?url=" + encodeURIComponent(base), wrapped: true, label: "proxy (allorigins/get)" }
+      ]
+    };
   }
 
-  async function loadTicker(symbol) {
-    var json = await fetchYahooChart(symbol);
+  async function runWave(attempts, timeoutMs) {
+    var settled = await Promise.allSettled(attempts.map(function (a) {
+      return fetchWithTimeout(a.url, timeoutMs, a.wrapped).then(function (json) {
+        return { attempt: a, json: json };
+      });
+    }));
+    var errors = [];
+    for (var i = 0; i < settled.length; i++) {
+      var s = settled[i];
+      if (s.status === "fulfilled") {
+        var json = s.value.json;
+        if (json && json.chart && json.chart.result && json.chart.result[0]) return { ok: true, json: json };
+        var reason = (json && json.chart && json.chart.error && json.chart.error.description) || "unexpected response shape";
+        errors.push(attempts[i].label + ": " + reason);
+      } else {
+        errors.push(attempts[i].label + ": " + (s.reason && s.reason.message ? s.reason.message : "failed"));
+      }
+    }
+    return { ok: false, errors: errors };
+  }
+
+  async function fetchYahooChart(symbol, period1, period2) {
+    var attempts = buildAttempts(symbol, period1, period2);
+    var wave1 = await runWave(attempts.direct, 6000);
+    if (wave1.ok) return wave1.json;
+    var wave2 = await runWave(attempts.proxy, 12000);
+    if (wave2.ok) return wave2.json;
+    var allErrors = wave1.errors.concat(wave2.errors);
+    throw new Error("all " + allErrors.length + " routes failed — " + allErrors.join("; "));
+  }
+
+  async function loadTicker(symbol, dateStr) {
+    var period1 = etDateTimeToUnixSeconds(dateStr, 15, 45);
+    var period2 = etDateTimeToUnixSeconds(dateStr, 18, 15);
+    var json = await fetchYahooChart(symbol, period1, period2);
     var result = json.chart.result[0];
     var meta = result.meta || {};
     var timestamps = result.timestamp || [];
@@ -394,7 +512,7 @@
     }
     var baseline = bars[WINDOW_START];
     if (baseline === undefined) {
-      throw new Error("no 4:00 PM print in range yet");
+      throw new Error("no 4:00 PM print available for that date (market closed, symbol delisted, or outside Yahoo's history window)");
     }
     return {
       symbol: symbol,
@@ -625,6 +743,7 @@
   }
 
   async function loadAll() {
+    var dateStr = describeSelectedDate();
     var entries = inputs.map(function (inp, idx) { return { idx: idx, symbol: inp.value.trim().toUpperCase() }; })
       .filter(function (e) { return e.symbol.length > 0; });
 
@@ -645,7 +764,7 @@
 
     await Promise.all(entries.map(async function (e) {
       try {
-        var r = await loadTicker(e.symbol);
+        var r = await loadTicker(e.symbol, dateStr);
         results.push(r);
         colorIdx.push(e.idx);
       } catch (err) {
@@ -669,7 +788,7 @@
 
     var now = new Date();
     var timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    setStatus(marketPhase() + " · last updated " + timeStr, liveToggle.checked);
+    setStatus(marketPhase(dateStr) + " · last updated " + timeStr, liveToggle.checked);
     loadBtn.disabled = false;
   }
 
