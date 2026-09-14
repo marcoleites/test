@@ -42,6 +42,9 @@ const FIRECRAWL_ENDPOINTS = [
 ];
 
 const SYMBOL_RE = /^[A-Za-z0-9.\-^=]{1,15}$/;
+const INTERVAL_RE = /^[0-9]{1,2}(m|h|d|wk|mo)$/;
+const RANGE_RE = /^(max|ytd|[0-9]{1,3}(d|mo|y))$/;
+const MODULES_RE = /^[A-Za-z]+(,[A-Za-z]+){0,9}$/;
 const CACHE_TTL_MS = 20000;
 const cache = new Map(); // key -> { expires, body }
 
@@ -94,33 +97,90 @@ async function firecrawlScrape(targetUrl) {
   throw lastErr || new Error("all Firecrawl endpoints failed");
 }
 
+// Handles two shapes of the chart endpoint:
+//   - period1/period2 (unix seconds), used by the after-hours dashboard for 5-minute intraday bars
+//   - interval/range (e.g. interval=1wk&range=2y), used by the Live Desk for daily/weekly bars
 async function handleQuote(req, res, query) {
   if (!FIRECRAWL_API_KEY) {
     sendJson(res, 500, { error: "FIRECRAWL_API_KEY is not set on the server. Start with: FIRECRAWL_API_KEY=fc-... node server.js" });
     return;
   }
   const symbol = (query.get("symbol") || "").toUpperCase();
-  const period1 = parseInt(query.get("period1"), 10);
-  const period2 = parseInt(query.get("period2"), 10);
-  if (!SYMBOL_RE.test(symbol) || !Number.isFinite(period1) || !Number.isFinite(period2)) {
-    sendJson(res, 400, { error: "invalid symbol/period1/period2" });
+  if (!SYMBOL_RE.test(symbol)) {
+    sendJson(res, 400, { error: "invalid symbol" });
     return;
   }
 
-  const cacheKey = symbol + "|" + period1 + "|" + period2;
+  const period1 = parseInt(query.get("period1"), 10);
+  const period2 = parseInt(query.get("period2"), 10);
+  const hasPeriods = Number.isFinite(period1) && Number.isFinite(period2);
+
+  const interval = query.get("interval") || (hasPeriods ? "5m" : "");
+  const range = query.get("range") || "";
+  if (!INTERVAL_RE.test(interval)) {
+    sendJson(res, 400, { error: "invalid interval" });
+    return;
+  }
+
+  let queryString;
+  let cacheKey;
+  if (hasPeriods) {
+    queryString = "interval=" + interval + "&includePrePost=true&period1=" + period1 + "&period2=" + period2;
+    cacheKey = symbol + "|" + interval + "|" + period1 + "|" + period2;
+  } else {
+    if (!RANGE_RE.test(range)) {
+      sendJson(res, 400, { error: "invalid range" });
+      return;
+    }
+    queryString = "interval=" + interval + "&range=" + range;
+    cacheKey = symbol + "|" + interval + "|" + range;
+  }
+
   const cached = cache.get(cacheKey);
   if (cached && cached.expires > Date.now()) {
     sendJson(res, 200, cached.body);
     return;
   }
 
-  const targetUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) +
-    "?interval=5m&includePrePost=true&period1=" + period1 + "&period2=" + period2;
+  const targetUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?" + queryString;
 
   try {
     const yahooJson = await firecrawlScrape(targetUrl);
     if (!yahooJson || !yahooJson.chart) throw new Error("unexpected payload shape from Firecrawl scrape");
     cache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, body: yahooJson });
+    sendJson(res, 200, yahooJson);
+  } catch (e) {
+    sendJson(res, 502, { error: "Firecrawl scrape failed: " + (e && e.message ? e.message : String(e)) });
+  }
+}
+
+// Live Desk sector lookup — proxies Yahoo's quoteSummary endpoint (assetProfile module)
+// so the browser can resolve a ticker's GICS sector to its SPDR sector ETF.
+async function handleQuoteSummary(req, res, query) {
+  if (!FIRECRAWL_API_KEY) {
+    sendJson(res, 500, { error: "FIRECRAWL_API_KEY is not set on the server. Start with: FIRECRAWL_API_KEY=fc-... node server.js" });
+    return;
+  }
+  const symbol = (query.get("symbol") || "").toUpperCase();
+  const modules = query.get("modules") || "assetProfile";
+  if (!SYMBOL_RE.test(symbol) || !MODULES_RE.test(modules)) {
+    sendJson(res, 400, { error: "invalid symbol/modules" });
+    return;
+  }
+
+  const cacheKey = "qs|" + symbol + "|" + modules;
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) {
+    sendJson(res, 200, cached.body);
+    return;
+  }
+
+  const targetUrl = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + encodeURIComponent(symbol) + "?modules=" + modules;
+
+  try {
+    const yahooJson = await firecrawlScrape(targetUrl);
+    if (!yahooJson || !yahooJson.quoteSummary) throw new Error("unexpected payload shape from Firecrawl scrape");
+    cache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS * 6, body: yahooJson }); // sector rarely changes — cache longer
     sendJson(res, 200, yahooJson);
   } catch (e) {
     sendJson(res, 502, { error: "Firecrawl scrape failed: " + (e && e.message ? e.message : String(e)) });
@@ -144,6 +204,10 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   if (url.pathname === "/api/quote") {
     handleQuote(req, res, url.searchParams).catch((e) => sendJson(res, 500, { error: String(e) }));
+    return;
+  }
+  if (url.pathname === "/api/quoteSummary") {
+    handleQuoteSummary(req, res, url.searchParams).catch((e) => sendJson(res, 500, { error: String(e) }));
     return;
   }
   serveStatic(req, res);
