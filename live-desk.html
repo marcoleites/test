@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Desk — Trade Score</title>
+<style>
+  :root { color-scheme: light; }
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-page:   #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --up:             #006300;
+    --down:           #d03b3b;
+    --warn:           #b3790c;
+    --series-1: #2a78d6; --series-2: #008300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-page:   #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --up:             #0ca30c;
+      --down:           #e66767;
+      --warn:           #e0a83b;
+      --series-1: #3987e5; --series-2: #0ca30c;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-page:   #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --up:             #0ca30c;
+    --down:           #e66767;
+    --warn:           #e0a83b;
+    --series-1: #3987e5; --series-2: #0ca30c;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--surface-page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .viz-root { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  .page-title { font-size: 20px; font-weight: 600; margin: 0 0 2px; }
+  .page-sub { font-size: 13px; color: var(--text-secondary); margin: 0 0 20px; }
+  .nav-link { font-size: 12px; }
+  .nav-link a { color: var(--text-secondary); }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .card-title { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .card-sub { font-size: 12px; color: var(--text-secondary); margin: 0 0 14px; }
+
+  .search-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  #tickerInput {
+    flex: 1 1 220px;
+    min-width: 160px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-primary);
+    text-transform: uppercase;
+  }
+  #tickerInput::placeholder { color: var(--text-muted); text-transform: none; font-weight: 400; }
+  #tickerInput:focus { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  button.primary {
+    background: var(--series-1);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  .status-line { font-size: 12px; color: var(--text-muted); }
+  .status-line .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:5px; background: var(--text-muted); }
+  .status-line.busy .dot { background: var(--series-1); }
+  .status-line.error .dot { background: var(--down); }
+  .errors { margin-top: 10px; font-size: 12px; color: var(--down); }
+  .errors div { margin-top: 2px; }
+  .empty-state { font-size: 13px; color: var(--text-secondary); padding: 30px 0; text-align: center; }
+
+  /* --- result header --- */
+  .result-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .result-symbol { font-size: 22px; font-weight: 700; }
+  .result-name { font-size: 13px; color: var(--text-secondary); margin-left: 8px; font-weight: 400; }
+  .result-price { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .result-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+  /* --- score grid --- */
+  .score-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-top: 16px;
+  }
+  @media (max-width: 760px) { .score-grid { grid-template-columns: repeat(2, 1fr); } }
+  .score-box {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 10px;
+    text-align: center;
+  }
+  .score-box .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); min-height: 26px; }
+  .score-box .value { font-size: 22px; font-weight: 700; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+  .score-box .value.good { color: var(--up); }
+  .score-box .value.mid { color: var(--warn); }
+  .score-box .value.bad { color: var(--down); }
+  .score-box .tag { font-size: 10.5px; color: var(--text-muted); }
+
+  .total-row { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 18px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
+  .total-label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+  .total-value { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .total-value.good { color: var(--up); }
+  .total-value.mid { color: var(--warn); }
+  .total-value.bad { color: var(--down); }
+
+  .decision-banner {
+    margin-top: 12px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 12px;
+    border-radius: 10px;
+    letter-spacing: 0.01em;
+  }
+  .decision-banner.good { background: color-mix(in srgb, var(--up) 14%, transparent); color: var(--up); }
+  .decision-banner.mid  { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .decision-banner.bad  { background: color-mix(in srgb, var(--down) 14%, transparent); color: var(--down); }
+
+  /* --- diagnostics --- */
+  .diag-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .diag-item { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; }
+  .diag-icon { flex: none; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; margin-top: 1px; }
+  .diag-icon.pass { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
+  .diag-icon.fail { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+  .diag-icon.na { background: var(--gridline); color: var(--text-muted); }
+  .diag-title { font-weight: 600; }
+  .diag-detail { color: var(--text-secondary); font-size: 12px; }
+
+  .timeframes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
+  @media (max-width: 760px) { .timeframes { grid-template-columns: 1fr; } }
+  .tf-title { font-size: 12px; font-weight: 600; margin: 0 0 6px; }
+  .tf-sub { font-size: 11px; color: var(--text-muted); margin: 0 0 8px; }
+  .chart-wrap { position: relative; }
+  svg.chart { width: 100%; height: auto; display: block; }
+  .gridline { stroke: var(--gridline); stroke-width: 1; }
+  .price-line { fill: none; stroke: var(--series-1); stroke-width: 1.6; }
+  .ma-line { fill: none; stroke: var(--text-muted); stroke-width: 1.2; stroke-dasharray: 3 3; }
+  .resistance-line { stroke: var(--down); stroke-width: 1; stroke-dasharray: 4 3; }
+  .chart-label { font-size: 9px; fill: var(--text-muted); }
+
+  .checks-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+  @media (max-width: 760px) { .checks-grid { grid-template-columns: 1fr 1fr; } }
+  .check { font-size: 11.5px; display: flex; gap: 6px; align-items: flex-start; }
+  .check .mark { flex: none; font-weight: 700; }
+  .check .mark.pass { color: var(--up); }
+  .check .mark.fail { color: var(--down); }
+
+  .metric-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .metric-block:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+  .metric-block-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .metric-block-head .name { font-size: 13px; font-weight: 600; }
+  .metric-block-head .score { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric-note { font-size: 11.5px; color: var(--text-secondary); margin-top: 4px; }
+
+  .footnote { font-size: 11px; color: var(--text-muted); margin-top: 14px; line-height: 1.5; }
+  .footnote code { background: var(--gridline); border-radius: 3px; padding: 1px 4px; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <p class="nav-link">&larr; <a href="index.html">After-Hours Ticker Dashboard</a></p>
+  <p class="page-title">Live Desk — Trade Score</p>
+  <p class="page-sub">Enter a US ticker and the desk grades it across multiple timeframes: market (SPY), sector (SPDR ETF), weekly resistance, daily confirmation and risk:reward — the same five factors a discretionary trader checks before entry.</p>
+
+  <div class="card">
+    <p class="card-title">Ticker</p>
+    <p class="card-sub">Works for any symbol Yahoo Finance carries. Sector strength needs a recognized GICS sector on the symbol's profile; otherwise the desk falls back to the broad market as the sector proxy.</p>
+    <div class="search-row">
+      <input type="text" id="tickerInput" placeholder="e.g. NVDA" autocomplete="off" spellcheck="false">
+      <button class="primary" id="analyzeBtn" type="button">Analyze</button>
+      <span class="status-line" id="statusLine"><span class="dot"></span>Idle</span>
+    </div>
+    <div class="errors" id="errorsBox"></div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none">
+    <div class="result-head">
+      <div><span class="result-symbol" id="resSymbol"></span><span class="result-name" id="resName"></span></div>
+      <div style="text-align:right">
+        <div class="result-price" id="resPrice"></div>
+        <div class="result-meta" id="resMeta"></div>
+      </div>
+    </div>
+
+    <p class="card-title" style="margin-top:18px">Professional Trade Score <span style="font-weight:400; color:var(--text-secondary)">(score before you enter)</span></p>
+    <div class="score-grid" id="scoreGrid"></div>
+    <div class="total-row">
+      <span class="total-label">Total score</span>
+      <span class="total-value" id="totalValue"></span>
+      <span class="total-label">/ 100</span>
+    </div>
+    <div class="decision-banner" id="decisionBanner"></div>
+  </div>
+
+  <div class="card" id="diagCard" style="display:none">
+    <p class="card-title">Why this score</p>
+    <p class="card-sub">Same checklist the diagram walks through — what a losing trade usually ignored before entry.</p>
+    <ul class="diag-list" id="diagList"></ul>
+  </div>
+
+  <div class="card" id="chartsCard" style="display:none">
+    <p class="card-title">Timeframes used</p>
+    <p class="card-sub">Weekly view drives resistance &amp; the higher-timeframe trend check; daily view drives confirmation &amp; risk:reward.</p>
+    <div class="timeframes">
+      <div>
+        <p class="tf-title">Weekly (2y) — <span id="weeklySymLabel"></span></p>
+        <p class="tf-sub">30-week MA (dashed grey) · nearest overhead resistance (dashed red)</p>
+        <div class="chart-wrap"><svg class="chart" id="weeklyChart" viewBox="0 0 480 220" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div>
+        <p class="tf-title">Daily (1y) — <span id="dailySymLabel"></span></p>
+        <p class="tf-sub">20-day MA (dashed grey) vs 50-day MA</p>
+        <div class="chart-wrap"><svg class="chart" id="dailyChart" viewBox="0 0 480 220" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="detailCard" style="display:none">
+    <p class="card-title">Score breakdown</p>
+    <div id="detailBody"></div>
+  </div>
+
+  <p class="footnote">
+    Heuristic desk tool, not investment advice. Scoring is a rules-based approximation (moving-average trend, swing
+    highs, ATR-based risk:reward) meant to mirror a discretionary "professional trade score" checklist — it is not a
+    substitute for your own analysis. Data comes from Yahoo Finance's public endpoints (weekly bars, 2y; daily bars,
+    1y). Sector strength uses the SPDR sector ETF matching the ticker's GICS sector; market strength uses SPY. As with
+    the after-hours dashboard, running the included local backend
+    (<code>FIRECRAWL_API_KEY=fc-... node server.js</code>) makes fetches faster and more reliable — without it, the
+    page falls back to public CORS proxies, and every failed route is listed in the error message.
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------------
+  // Sector -> representative SPDR sector ETF (mirrors Yahoo's GICS labels)
+  // ---------------------------------------------------------------------
+  var SECTOR_ETF = {
+    "Technology": "XLK",
+    "Financial Services": "XLF",
+    "Financial": "XLF",
+    "Healthcare": "XLV",
+    "Consumer Cyclical": "XLY",
+    "Consumer Defensive": "XLP",
+    "Energy": "XLE",
+    "Industrials": "XLI",
+    "Basic Materials": "XLB",
+    "Real Estate": "XLRE",
+    "Utilities": "XLU",
+    "Communication Services": "XLC"
+  };
+  var MARKET_SYMBOL = "SPY";
+
+  var tickerInput = document.getElementById("tickerInput");
+  var analyzeBtn = document.getElementById("analyzeBtn");
+  var statusLine = document.getElementById("statusLine");
+  var errorsBox = document.getElementById("errorsBox");
+  var resultCard = document.getElementById("resultCard");
+  var diagCard = document.getElementById("diagCard");
+  var chartsCard = document.getElementById("chartsCard");
+  var detailCard = document.getElementById("detailCard");
+
+  function setStatus(text, cls) {
+    statusLine.className = "status-line" + (cls ? " " + cls : "");
+    statusLine.innerHTML = "<span class=\"dot\"></span>" + text;
+  }
+  function setErrors(msgs) {
+    errorsBox.innerHTML = (msgs || []).map(function (m) { return "<div>" + m + "</div>"; }).join("");
+  }
+
+  // -----------------------------------------------------------------------
+  // Fetching — same "race every direct + proxy route" pattern as index.html,
+  // generalized to cover both the chart endpoint (any interval/range) and
+  // the quoteSummary endpoint (sector lookup).
+  // -----------------------------------------------------------------------
+  async function fetchWithTimeout(url, ms, parseWrapped) {
+    var ctrl = new AbortController();
+    var timedOut = false;
+    var timer = setTimeout(function () { timedOut = true; ctrl.abort(); }, ms);
+    try {
+      var res;
+      try {
+        res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+      } catch (e) {
+        if (timedOut) throw new Error("timed out after " + ms + "ms");
+        throw new Error("network error (" + (e && e.message ? e.message : "blocked") + ")");
+      }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      var text = await res.text();
+      var payload = text;
+      if (parseWrapped) {
+        var wrapper = JSON.parse(text);
+        payload = wrapper.contents;
+      }
+      return JSON.parse(payload);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function proxyRoutes(base) {
+    return [
+      { url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (allorigins/raw)", timeout: 12000 },
+      { url: "https://corsproxy.io/?url=" + encodeURIComponent(base), wrapped: false, label: "proxy (corsproxy.io)", timeout: 12000 },
+      { url: "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(base), wrapped: false, label: "proxy (codetabs)", timeout: 12000 },
+      { url: "https://api.allorigins.win/get?url=" + encodeURIComponent(base), wrapped: true, label: "proxy (allorigins/get)", timeout: 12000 },
+      { url: "https://thingproxy.freeboard.io/fetch/" + base, wrapped: false, label: "proxy (thingproxy)", timeout: 12000 },
+      { url: "https://proxy.corsfix.com/?" + base, wrapped: false, label: "proxy (corsfix)", timeout: 12000 }
+    ];
+  }
+
+  function buildChartAttempts(symbol, interval, range) {
+    var enc = encodeURIComponent(symbol);
+    var q = "interval=" + interval + "&range=" + range;
+    var base = "https://query1.finance.yahoo.com/v8/finance/chart/" + enc + "?" + q;
+    var base2 = "https://query2.finance.yahoo.com/v8/finance/chart/" + enc + "?" + q;
+    return [
+      { url: "/api/quote?symbol=" + enc + "&interval=" + interval + "&range=" + range, wrapped: false, label: "local backend (Firecrawl)", timeout: 20000 },
+      { url: base, wrapped: false, label: "direct (query1)", timeout: 6000 },
+      { url: base2, wrapped: false, label: "direct (query2)", timeout: 6000 }
+    ].concat(proxyRoutes(base));
+  }
+
+  function buildSummaryAttempts(symbol) {
+    var enc = encodeURIComponent(symbol);
+    var modules = "assetProfile";
+    var base = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + enc + "?modules=" + modules;
+    return [
+      { url: "/api/quoteSummary?symbol=" + enc + "&modules=" + modules, wrapped: false, label: "local backend (Firecrawl)", timeout: 20000 },
+      { url: base, wrapped: false, label: "direct (query1)", timeout: 6000 }
+    ].concat(proxyRoutes(base));
+  }
+
+  async function raceFetch(attempts, validate) {
+    var errors = new Array(attempts.length);
+    var promises = attempts.map(function (a, i) {
+      return fetchWithTimeout(a.url, a.timeout, a.wrapped).then(function (json) {
+        if (validate(json)) return json;
+        throw new Error("unexpected response shape");
+      }).catch(function (e) {
+        errors[i] = a.label + ": " + (e && e.message ? e.message : "failed");
+        throw e;
+      });
+    });
+    try {
+      return await Promise.any(promises);
+    } catch (aggErr) {
+      var list = errors.filter(Boolean);
+      throw new Error("all " + attempts.length + " routes failed — " + list.join("; "));
+    }
+  }
+
+  function parseChartResult(result) {
+    var meta = result.meta || {};
+    var ts = result.timestamp || [];
+    var q = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {};
+    var bars = [];
+    for (var i = 0; i < ts.length; i++) {
+      var c = q.close ? q.close[i] : null;
+      if (c === null || c === undefined) continue;
+      bars.push({
+        t: ts[i],
+        o: q.open ? q.open[i] : c,
+        h: q.high ? q.high[i] : c,
+        l: q.low ? q.low[i] : c,
+        c: c,
+        v: q.volume ? (q.volume[i] || 0) : 0
+      });
+    }
+    return {
+      symbol: meta.symbol || "",
+      name: meta.shortName || meta.longName || meta.symbol || "",
+      price: typeof meta.regularMarketPrice === "number" ? meta.regularMarketPrice : (bars.length ? bars[bars.length - 1].c : null),
+      currency: meta.currency || "USD",
+      marketState: meta.marketState || "",
+      bars: bars
+    };
+  }
+
+  async function fetchChart(symbol, interval, range) {
+    var json = await raceFetch(buildChartAttempts(symbol, interval, range), function (j) {
+      return j && j.chart && j.chart.result && j.chart.result[0] && !j.chart.error;
+    });
+    return parseChartResult(json.chart.result[0]);
+  }
+
+  async function fetchSector(symbol) {
+    try {
+      var json = await raceFetch(buildSummaryAttempts(symbol), function (j) {
+        return j && j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
+      });
+      var profile = json.quoteSummary.result[0].assetProfile || {};
+      return profile.sector || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Indicator math
+  // -----------------------------------------------------------------------
+  function smaAt(arr, period, endIdx) {
+    var start = Math.max(0, endIdx - period + 1);
+    var slice = arr.slice(start, endIdx + 1);
+    if (!slice.length) return null;
+    var sum = 0;
+    for (var i = 0; i < slice.length; i++) sum += slice[i];
+    return sum / slice.length;
+  }
+
+  function atr(bars, period) {
+    var n = bars.length;
+    if (n < 2) return 0;
+    var trs = [];
+    var start = Math.max(1, n - period - 5);
+    for (var i = start; i < n; i++) {
+      var h = bars[i].h, l = bars[i].l, pc = bars[i - 1].c;
+      trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    }
+    var last = trs.slice(-period);
+    if (!last.length) return 0;
+    var sum = 0;
+    for (var j = 0; j < last.length; j++) sum += last[j];
+    return sum / last.length;
+  }
+
+  // Market / sector strength: four equally-weighted trend checks on weekly bars.
+  function trendScore(bars) {
+    var closes = bars.map(function (b) { return b.c; });
+    var n = closes.length;
+    if (n < 35) {
+      return { score: 10, checks: [{ label: "Not enough weekly history for a reliable read", pass: null }] };
+    }
+    var price = closes[n - 1];
+    var ma30 = smaAt(closes, 30, n - 1);
+    var ma30prev = smaAt(closes, 30, Math.max(29, n - 6));
+    var price13ago = closes[Math.max(0, n - 14)];
+    var window52 = closes.slice(Math.max(0, n - 52));
+    var high52 = Math.max.apply(null, window52);
+    var distFromHigh = high52 > 0 ? ((high52 - price) / high52) * 100 : 0;
+    var checks = [
+      { label: "Price above 30-week MA", pass: price > ma30 },
+      { label: "30-week MA trending up", pass: ma30 > ma30prev },
+      { label: "Positive 3-month momentum", pass: price > price13ago },
+      { label: "Within 10% of 52-week high", pass: distFromHigh < 10 }
+    ];
+    var score = checks.reduce(function (s, c) { return s + (c.pass ? 5 : 0); }, 0);
+    return { score: score, checks: checks, ma30: ma30, distFromHigh: distFromHigh };
+  }
+
+  // Nearest overhead resistance from weekly highs, and the score for how much room there is.
+  function resistanceScore(weeklyBars, price) {
+    var n = weeklyBars.length;
+    if (n < 10) return { score: 10, level: null, distPct: null, note: "Not enough weekly history" };
+    var window = weeklyBars.slice(Math.max(0, n - 104), Math.max(0, n - 3)); // exclude the still-forming last 3 weeks
+    var above = window.map(function (b) { return b.h; }).filter(function (h) { return h > price; });
+    if (!above.length) {
+      return { score: 20, level: null, distPct: null, note: "No overhead resistance in the last 2 years — price is at/near highs" };
+    }
+    var level = Math.min.apply(null, above);
+    var distPct = ((level - price) / price) * 100;
+    var score = distPct >= 8 ? 20 : distPct >= 5 ? 15 : distPct >= 2 ? 10 : 5;
+    return { score: score, level: level, distPct: distPct };
+  }
+
+  // Daily confirmation: trend alignment, momentum, and volume participation.
+  function confirmationScore(dailyBars) {
+    var closes = dailyBars.map(function (b) { return b.c; });
+    var vols = dailyBars.map(function (b) { return b.v; });
+    var n = closes.length;
+    if (n < 55) return { score: 10, checks: [{ label: "Not enough daily history for a reliable read", pass: null }], volumeWeak: null };
+    var price = closes[n - 1];
+    var sma20 = smaAt(closes, 20, n - 1);
+    var sma50 = smaAt(closes, 50, n - 1);
+    var price10ago = closes[Math.max(0, n - 11)];
+    var avgVol20 = smaAt(vols, 20, n - 1);
+    var lastVol = vols[n - 1];
+    var checks = [
+      { label: "Price above 20-day MA", pass: price > sma20 },
+      { label: "20-day MA above 50-day MA", pass: sma20 > sma50 },
+      { label: "Holding gains — positive 10-day momentum", pass: price > price10ago },
+      { label: "Volume confirming (≥ 20-day average)", pass: avgVol20 > 0 && lastVol >= avgVol20 }
+    ];
+    var score = checks.reduce(function (s, c) { return s + (c.pass ? 5 : 0); }, 0);
+    return { score: score, checks: checks, volumeWeak: !checks[3].pass, sma20: sma20, sma50: sma50 };
+  }
+
+  // Risk:reward using a swing-low / ATR stop against the nearest weekly resistance as target.
+  function riskRewardScore(dailyBars, price, resistanceLevel) {
+    var n = dailyBars.length;
+    if (n < 20) return { score: 10, stop: null, target: null, rr: null };
+    var lows = dailyBars.map(function (b) { return b.l; });
+    var swingLow = Math.min.apply(null, lows.slice(Math.max(0, n - 10)));
+    var atr14 = atr(dailyBars, 14);
+    var stopByAtr = price - 1.5 * atr14;
+    var stop = Math.max(swingLow, stopByAtr);
+    if (!(stop < price)) stop = price - Math.max(atr14 * 0.5, price * 0.01, 0.01);
+    var target = resistanceLevel != null ? resistanceLevel : price + 2 * atr14;
+    var risk = price - stop;
+    var reward = target - price;
+    var rr = risk > 0 ? reward / risk : 0;
+    var score = rr >= 3 ? 20 : rr >= 2 ? 15 : rr >= 1.5 ? 10 : rr >= 1 ? 5 : 0;
+    return { score: score, stop: stop, target: target, rr: rr };
+  }
+
+  function scoreClass(score, max) {
+    var pct = score / max;
+    return pct >= 0.7 ? "good" : pct >= 0.4 ? "mid" : "bad";
+  }
+
+  function fmtPrice(v) { return v == null ? "—" : "$" + v.toFixed(2); }
+  function fmtPct(v) { return v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(1) + "%"; }
+
+  // -----------------------------------------------------------------------
+  // Rendering
+  // -----------------------------------------------------------------------
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function renderScoreGrid(items) {
+    var grid = document.getElementById("scoreGrid");
+    grid.innerHTML = "";
+    items.forEach(function (it) {
+      var box = el("div", "score-box");
+      box.appendChild(el("div", "label", it.label));
+      box.appendChild(el("div", "value " + scoreClass(it.score, 20), it.score + "/20"));
+      box.appendChild(el("div", "tag", it.tag));
+      grid.appendChild(box);
+    });
+  }
+
+  function renderDiagnostics(items) {
+    var list = document.getElementById("diagList");
+    list.innerHTML = "";
+    items.forEach(function (it) {
+      var li = el("li", "diag-item");
+      var iconCls = it.pass === null ? "na" : it.pass ? "pass" : "fail";
+      var icon = el("span", "diag-icon " + iconCls, it.pass === null ? "•" : it.pass ? "✓" : "✗");
+      var body = el("div");
+      body.appendChild(el("div", "diag-title", it.title));
+      body.appendChild(el("div", "diag-detail", it.detail));
+      li.appendChild(icon);
+      li.appendChild(body);
+      list.appendChild(li);
+    });
+  }
+
+  function renderChecks(container, checks) {
+    container.innerHTML = "";
+    if (!checks || !checks.length) return;
+    var grid = el("div", "checks-grid");
+    checks.forEach(function (c) {
+      var row = el("div", "check");
+      var mark = el("span", "mark " + (c.pass === null ? "" : c.pass ? "pass" : "fail"), c.pass === null ? "•" : c.pass ? "✓" : "✗");
+      row.appendChild(mark);
+      row.appendChild(el("span", "", c.label));
+      grid.appendChild(row);
+    });
+    container.appendChild(grid);
+  }
+
+  function renderMiniChart(svgEl, bars, maPeriod, ma2Period, resistanceLevel) {
+    svgEl.innerHTML = "";
+    var W = 480, H = 220, padL = 8, padR = 8, padT = 10, padB = 10;
+    if (!bars.length) return;
+    var closes = bars.map(function (b) { return b.c; });
+    var ma1 = closes.map(function (_, i) { return i >= maPeriod - 1 ? smaAt(closes, maPeriod, i) : null; });
+    var ma2 = ma2Period ? closes.map(function (_, i) { return i >= ma2Period - 1 ? smaAt(closes, ma2Period, i) : null; }) : null;
+    var allVals = closes.slice();
+    ma1.forEach(function (v) { if (v != null) allVals.push(v); });
+    if (ma2) ma2.forEach(function (v) { if (v != null) allVals.push(v); });
+    if (resistanceLevel != null) allVals.push(resistanceLevel);
+    var vMin = Math.min.apply(null, allVals), vMax = Math.max.apply(null, allVals);
+    if (vMin === vMax) { vMin -= 1; vMax += 1; }
+    var pad = (vMax - vMin) * 0.06;
+    vMin -= pad; vMax += pad;
+    var n = bars.length;
+    function x(i) { return padL + (i / Math.max(1, n - 1)) * (W - padL - padR); }
+    function y(v) { return padT + (vMax - v) / (vMax - vMin) * (H - padT - padB); }
+
+    var svgNS = "http://www.w3.org/2000/svg";
+    function pathFor(vals) {
+      var d = "";
+      for (var i = 0; i < vals.length; i++) {
+        if (vals[i] == null) continue;
+        d += (d ? "L" : "M") + x(i).toFixed(1) + "," + y(vals[i]).toFixed(1) + " ";
+      }
+      return d.trim();
+    }
+
+    // gridlines (4 horizontal)
+    for (var g = 0; g <= 3; g++) {
+      var gy = padT + (g / 3) * (H - padT - padB);
+      var line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", padL); line.setAttribute("x2", W - padR);
+      line.setAttribute("y1", gy.toFixed(1)); line.setAttribute("y2", gy.toFixed(1));
+      line.setAttribute("class", "gridline");
+      svgEl.appendChild(line);
+    }
+
+    if (resistanceLevel != null && resistanceLevel <= vMax && resistanceLevel >= vMin) {
+      var rline = document.createElementNS(svgNS, "line");
+      rline.setAttribute("x1", padL); rline.setAttribute("x2", W - padR);
+      rline.setAttribute("y1", y(resistanceLevel).toFixed(1)); rline.setAttribute("y2", y(resistanceLevel).toFixed(1));
+      rline.setAttribute("class", "resistance-line");
+      svgEl.appendChild(rline);
+    }
+
+    if (ma2) {
+      var ma2path = document.createElementNS(svgNS, "path");
+      ma2path.setAttribute("d", pathFor(ma2));
+      ma2path.setAttribute("class", "ma-line");
+      ma2path.setAttribute("stroke", "var(--series-2)");
+      svgEl.appendChild(ma2path);
+    }
+
+    var ma1path = document.createElementNS(svgNS, "path");
+    ma1path.setAttribute("d", pathFor(ma1));
+    ma1path.setAttribute("class", "ma-line");
+    svgEl.appendChild(ma1path);
+
+    var pricePath = document.createElementNS(svgNS, "path");
+    pricePath.setAttribute("d", pathFor(closes));
+    pricePath.setAttribute("class", "price-line");
+    svgEl.appendChild(pricePath);
+  }
+
+  function decisionFor(total) {
+    if (total >= 75) return { text: "HIGH-PROBABILITY SETUP — CONDITIONS ALIGN", cls: "good" };
+    if (total >= 55) return { text: "MARGINAL — WAIT FOR MORE CONFIRMATION", cls: "mid" };
+    return { text: "LOW-PROBABILITY TRADE — SKIP THIS TRADE", cls: "bad" };
+  }
+
+  function detailRow(name, score, max, note) {
+    var block = el("div", "metric-block");
+    var head = el("div", "metric-block-head");
+    head.appendChild(el("span", "name", name));
+    head.appendChild(el("span", "score", score + "/" + max));
+    block.appendChild(head);
+    block.appendChild(el("div", "metric-note", note));
+    return block;
+  }
+
+  // -----------------------------------------------------------------------
+  // Main analysis flow
+  // -----------------------------------------------------------------------
+  async function analyze() {
+    var symbol = tickerInput.value.trim().toUpperCase();
+    if (!symbol) { setErrors(["Enter a ticker symbol first."]); return; }
+
+    analyzeBtn.disabled = true;
+    setErrors([]);
+    setStatus("Pulling weekly &amp; daily bars for " + symbol + ", SPY and the sector ETF…", "busy");
+    resultCard.style.display = "none";
+    diagCard.style.display = "none";
+    chartsCard.style.display = "none";
+    detailCard.style.display = "none";
+
+    var errors = [];
+
+    try {
+      var sectorNamePromise = fetchSector(symbol).catch(function () { return null; });
+      var tickerWeeklyPromise = fetchChart(symbol, "1wk", "2y");
+      var tickerDailyPromise = fetchChart(symbol, "1d", "1y");
+      var marketWeeklyPromise = fetchChart(MARKET_SYMBOL, "1wk", "2y").catch(function (e) { errors.push("Market (SPY): " + e.message); return null; });
+
+      var sectorName = await sectorNamePromise;
+      var sectorEtf = sectorName && SECTOR_ETF[sectorName] ? SECTOR_ETF[sectorName] : null;
+      var sectorWeeklyPromise = sectorEtf
+        ? fetchChart(sectorEtf, "1wk", "2y").catch(function (e) { errors.push("Sector (" + sectorEtf + "): " + e.message); return null; })
+        : Promise.resolve(null);
+
+      var results = await Promise.all([tickerWeeklyPromise, tickerDailyPromise, marketWeeklyPromise, sectorWeeklyPromise]);
+      var tickerWeekly = results[0], tickerDaily = results[1], marketWeekly = results[2], sectorWeekly = results[3];
+
+      if (!tickerWeekly.bars.length || !tickerDaily.bars.length) {
+        throw new Error("no usable price history returned for " + symbol);
+      }
+
+      var price = tickerDaily.price != null ? tickerDaily.price : tickerDaily.bars[tickerDaily.bars.length - 1].c;
+
+      var usedSectorEtf = sectorWeekly ? sectorEtf : MARKET_SYMBOL;
+      var sectorBarsForScore = sectorWeekly ? sectorWeekly.bars : (marketWeekly ? marketWeekly.bars : []);
+
+      var market = marketWeekly ? trendScore(marketWeekly.bars) : { score: 10, checks: [{ label: "Market data unavailable", pass: null }] };
+      var sector = sectorBarsForScore.length ? trendScore(sectorBarsForScore) : { score: 10, checks: [{ label: "Sector data unavailable", pass: null }] };
+      var resistance = resistanceScore(tickerWeekly.bars, price);
+      var confirmation = confirmationScore(tickerDaily.bars);
+      var riskReward = riskRewardScore(tickerDaily.bars, price, resistance.level);
+      var tickerOwnTrend = trendScore(tickerWeekly.bars); // used only for the "ignored higher timeframe" diagnostic
+
+      var total = market.score + sector.score + resistance.score + confirmation.score + riskReward.score;
+      var decision = decisionFor(total);
+
+      // ---- header ----
+      document.getElementById("resSymbol").textContent = tickerDaily.symbol || symbol;
+      document.getElementById("resName").textContent = tickerDaily.name && tickerDaily.name !== symbol ? tickerDaily.name : "";
+      document.getElementById("resPrice").textContent = fmtPrice(price);
+      document.getElementById("resMeta").textContent = "Sector: " + (sectorName || "unknown") + (sectorEtf ? " (" + sectorEtf + ")" : sectorWeekly ? "" : " — using SPY as proxy");
+
+      // ---- score grid ----
+      renderScoreGrid([
+        { label: "1. Market Strength (SPY)", score: market.score, tag: market.score >= 15 ? "STRONG" : market.score >= 10 ? "MIXED" : "WEAK" },
+        { label: "2. Sector Strength (" + usedSectorEtf + ")", score: sector.score, tag: sector.score >= 15 ? "STRONG" : sector.score >= 10 ? "MIXED" : "WEAK" },
+        { label: "3. Weekly Resistance", score: resistance.score, tag: resistance.distPct == null ? (resistance.level == null ? "CLEAR" : "N/A") : resistance.distPct < 2 ? "TOO CLOSE" : resistance.distPct < 5 ? "CLOSE" : "ROOM" },
+        { label: "4. Confirmation", score: confirmation.score, tag: confirmation.score >= 15 ? "CONFIRMED" : confirmation.score >= 10 ? "PARTIAL" : "NO" },
+        { label: "5. Risk:Reward", score: riskReward.score, tag: riskReward.rr == null ? "N/A" : "1:" + riskReward.rr.toFixed(1) }
+      ]);
+      document.getElementById("totalValue").textContent = total;
+      document.getElementById("totalValue").className = "total-value " + decision.cls;
+      var banner = document.getElementById("decisionBanner");
+      banner.textContent = "PROFESSIONAL DECISION: " + decision.text;
+      banner.className = "decision-banner " + decision.cls;
+      resultCard.style.display = "";
+
+      // ---- diagnostics (7-point checklist, mirrors the reference diagram) ----
+      renderDiagnostics([
+        { title: "Market strength", pass: market.score >= 15, detail: market.score >= 15 ? "SPY is in an uptrend — tailwind for this trade." : "SPY isn't confirming strength (" + market.score + "/20) — headwind for this trade." },
+        { title: "Near resistance", pass: resistance.distPct == null || resistance.distPct >= 5, detail: resistance.level == null ? "No overhead resistance found in the last 2 years." : "Nearest weekly resistance " + fmtPrice(resistance.level) + ", " + fmtPct(resistance.distPct) + " above price." },
+        { title: "Higher timeframe respected", pass: tickerOwnTrend.checks[1] ? tickerOwnTrend.checks[1].pass : null, detail: tickerOwnTrend.checks[1] && tickerOwnTrend.checks[1].pass === false ? "This symbol's own 30-week MA is rolling over — the weekly chart disagrees with a long entry." : "This symbol's own 30-week MA is trending up." },
+        { title: "Sister stocks (sector) strong", pass: sector.score >= 15, detail: sector.score >= 15 ? usedSectorEtf + " confirms sector strength." : usedSectorEtf + " isn't confirming (" + sector.score + "/20) — peers aren't leading." },
+        { title: "Breakout confirmed", pass: confirmation.score >= 15, detail: confirmation.score >= 15 ? "Daily trend, momentum and volume line up." : "Entry would be ahead of confirmation (" + confirmation.score + "/20 on daily checks)." },
+        { title: "Risk:reward acceptable", pass: riskReward.rr != null && riskReward.rr >= 1.5, detail: riskReward.rr == null ? "Not enough data to size risk:reward." : "Stop " + fmtPrice(riskReward.stop) + ", target " + fmtPrice(riskReward.target) + " → 1:" + riskReward.rr.toFixed(1) + "." },
+        { title: "Volume confirming", pass: confirmation.volumeWeak == null ? null : !confirmation.volumeWeak, detail: confirmation.volumeWeak == null ? "Not enough data." : confirmation.volumeWeak ? "Latest volume is below the 20-day average — weak participation." : "Latest volume is at/above the 20-day average." }
+      ]);
+      diagCard.style.display = "";
+
+      // ---- charts ----
+      document.getElementById("weeklySymLabel").textContent = symbol;
+      document.getElementById("dailySymLabel").textContent = symbol;
+      renderMiniChart(document.getElementById("weeklyChart"), tickerWeekly.bars, 30, null, resistance.level);
+      renderMiniChart(document.getElementById("dailyChart"), tickerDaily.bars, 20, 50, null);
+      chartsCard.style.display = "";
+
+      // ---- breakdown ----
+      var detailBody = document.getElementById("detailBody");
+      detailBody.innerHTML = "";
+      var b1 = detailRow("Market Strength", market.score, 20, "SPY weekly trend — price vs. 30-week MA, MA slope, 3-month momentum, distance from 52-week high.");
+      renderChecks(b1, market.checks); detailBody.appendChild(b1);
+      var b2 = detailRow("Sector Strength", sector.score, 20, usedSectorEtf + " weekly trend, same four checks as market strength.");
+      renderChecks(b2, sector.checks); detailBody.appendChild(b2);
+      var b3 = detailRow("Weekly Resistance", resistance.score, 20, resistance.level == null ? "No swing high above price in the last 2 years — treated as clear runway." : "Nearest weekly swing high above price: " + fmtPrice(resistance.level) + " (" + fmtPct(resistance.distPct) + " away). Full score needs ≥8% of room.");
+      detailBody.appendChild(b3);
+      var b4 = detailRow("Confirmation", confirmation.score, 20, "Daily trend/momentum/volume — is the move already proven, not anticipated?");
+      renderChecks(b4, confirmation.checks); detailBody.appendChild(b4);
+      var b5 = detailRow("Risk:Reward", riskReward.score, 20, riskReward.rr == null ? "Not enough daily history to size a stop/target." : "Stop " + fmtPrice(riskReward.stop) + " (tighter of 10-day swing low / 1.5×ATR14), target " + fmtPrice(riskReward.target) + " (nearest weekly resistance, or a measured move if none). Ratio 1:" + riskReward.rr.toFixed(2) + ".");
+      detailBody.appendChild(b5);
+      detailCard.style.display = "";
+
+      if (errors.length) setErrors(errors.map(function (e) { return "Note: " + e + " — fell back where possible."; }));
+      setStatus("Updated " + new Date().toLocaleTimeString(), "");
+    } catch (e) {
+      setErrors([(e && e.message) ? e.message : String(e)]);
+      setStatus("Failed", "error");
+    } finally {
+      analyzeBtn.disabled = false;
+    }
+  }
+
+  analyzeBtn.addEventListener("click", analyze);
+  tickerInput.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") analyze();
+  });
+})();
+</script>
+</body>
+</html>
