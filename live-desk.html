@@ -273,6 +273,12 @@
     the after-hours dashboard, running the included local backend
     (<code>FIRECRAWL_API_KEY=fc-... node server.js</code>) makes fetches faster and more reliable — without it, the
     page falls back to public CORS proxies, and every failed route is listed in the error message.
+    <br><br>
+    <strong>Known limitation:</strong> Yahoo's <code>quoteSummary</code> endpoint (used to look up a ticker's sector)
+    increasingly rejects anonymous requests with an "Invalid Crumb" error, since it now expects a browser session
+    cookie Yahoo issues alongside that crumb. When that lookup fails, the desk falls back to grading Sector Strength
+    against SPY instead — the result header will say "using SPY as proxy" whenever that happens, so a total score
+    resting on real sector data versus this fallback is always visible, not silent.
   </p>
 </div>
 
